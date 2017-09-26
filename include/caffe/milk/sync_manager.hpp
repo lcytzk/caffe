@@ -51,19 +51,17 @@ class SyncManager {
         //std::map<int, int> no2sock;
         //std::map<int, std::thread*> no2handler;
         std::map<int, std::thread*> sock2handler;
-        std::vector<Dtype*> diffPtrs;
-        std::vector<Dtype*> dataPtrs;
         std::vector<int> dataSize;
         std::vector<int> socks;
         std::thread *listenThread;
         int localSock;
-        int currentRecv;
-        int currentSend;
+        int diffRecv;
         int clientNum;
-        bool lastFinish;
-        //bool sendFlag = false;
-        std::condition_variable finishCond;
-        mutable std::mutex countLock;
+        bool lastUpdateFinish;
+        std::condition_variable diffRecvFinishCond;
+        std::condition_variable lastUpdateFinishCond;
+        mutable std::mutex diffRecvLock;
+        mutable std::mutex lastUpdateFinishLock;
         //int dataVersion = 0;
         //int lagGap = 1;
         //std::unordered_map<int, int> versionMap;
@@ -76,7 +74,6 @@ class SyncManager {
         void listen();
         void makeListener();
         void mergeDiff();
-        void initParams();
 };
 
 #endif

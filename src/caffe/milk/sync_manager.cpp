@@ -8,13 +8,15 @@ template<typename Dtype>
 SyncManager<Dtype>::SyncManager(int mode_, int num, const std::vector<Blob<Dtype>*>& learnable_params_): 
     mode(mode_), 
     learnable_params(learnable_params_),
-    currentRecv(0),
-    currentSend(0),
+    diffRecv(0),
     clientNum(num),
-    lastFinish(true)
+    lastUpdateFinish(true)
 {
     mode = mode;
-    initParams();
+    printf("have %d clients\n", clientNum);
+    for(size_t i = 0; i < learnable_params.size(); ++i) {
+        dataSize.push_back(learnable_params[i]->count() * sizeof(Dtype));
+    }
     initConn();
 }
 
@@ -22,28 +24,6 @@ template<typename Dtype>
 SyncManager<Dtype>::~SyncManager() {
     if(mode == 1) closeConn(localSock);
 }
-
-template<typename Dtype>
-void SyncManager<Dtype>::initParams() {
-    switch(Caffe::mode()) {
-        case Caffe::CPU:
-            for(auto l : learnable_params) {
-                dataPtrs.push_back(l->mutable_cpu_data());
-                diffPtrs.push_back(l->mutable_cpu_diff());
-                dataSize.push_back(l->count() * sizeof(Dtype));
-            }
-            break;
-        case Caffe::GPU:
-            for(auto l : learnable_params) {
-                dataPtrs.push_back(l->mutable_gpu_data());
-                diffPtrs.push_back(l->mutable_gpu_diff());
-                dataSize.push_back(l->count() * sizeof(Dtype));
-                printf("layer size is %d\n", l->count() * sizeof(Dtype));
-            }
-            break;
-    }
-}
-
 
 template<typename Dtype>
 void SyncManager<Dtype>::initConn() {
@@ -119,9 +99,9 @@ void SyncManager<Dtype>::pushDiff() {
     int flag = PUSH_FULL_DIFF;
     sendAll(localSock, &flag, sizeof(flag));
     for(size_t i = 0; i < learnable_params.size(); ++i) {
-        //printf("send learnable layer diff id %d size %d\n", i, size);
-        sendAll(localSock, diffPtrs[i], dataSize[i]);
+        sendAll(localSock, learnable_params[i]->cpu_diff(), dataSize[i]);
     }
+    //printf("send model diff to server done\n");
 }
 
 template<typename Dtype>
@@ -130,8 +110,8 @@ void SyncManager<Dtype>::pullModel() {
     int flag = PULL_FULL_MODEL;
     sendAll(localSock, &flag, sizeof(flag));
     for(size_t i = 0; i < learnable_params.size(); ++i) {
-        //printf("recv learnable layer id %d size %d\n", i, dataSize[i]);
-        recvAll(localSock, dataPtrs[i], dataSize[i]);
+        //printf("recv learnable layer diff id %d size %d\n", i, learnable_params[i]->count() * sizeof(Dtype));
+        recvAll(localSock, learnable_params[i]->mutable_cpu_data(), dataSize[i]);
     }
     //printf("Get model from server done.\n");
 }
@@ -139,72 +119,60 @@ void SyncManager<Dtype>::pullModel() {
 template<typename Dtype>
 void SyncManager<Dtype>::getDiff(int sock) {
     //printf("Get diff from client\n");
+    lastUpdateFinish = false;
     std::vector<Dtype*>* tmp = new std::vector<Dtype*>();
     for(size_t i = 0; i < learnable_params.size(); ++i) {
         int size = dataSize[i];
         Dtype* buff = (Dtype*) malloc(size);
         recvAll(sock, buff, size);
-        //Dtype* mdata = learnable_params[i]->mutable_cpu_diff();
-        //for(int j = 0; j < learnable_params[i]->count(); ++j) {
-        //    mdata[j] += buff[j] / clientNum;
-        //}
         tmp->push_back(buff);
-        //free(buff);
     }
-    countLock.lock();
+
+    diffRecvLock.lock();
     sock2recvCache[sock] = tmp;
-    ++currentRecv;
-    countLock.unlock();
-    finishCond.notify_all();
+    ++diffRecv;
+    diffRecvLock.unlock();
+
+    diffRecvFinishCond.notify_all();
+    //printf("Get diff from client done. currentRecv, %d\n", currentRecv);
 }
 
+// Only after update finish, the model can be send.
 template<typename Dtype>
 void SyncManager<Dtype>::sendModel(int sock) {
     //printf("send model to client\n");
-    std::unique_lock<std::mutex> lck(countLock);
-    finishCond.wait(lck, [this]{return lastFinish;});
+    std::unique_lock<std::mutex> lck(lastUpdateFinishLock);
+    lastUpdateFinishCond.wait(lck, [this]{ return lastUpdateFinish; });
     for(size_t i = 0; i < learnable_params.size(); ++i) {
-        //printf("send learnable layer id %d size %d\n", i, dataSize[i]);
-        sendAll(sock, dataPtrs[i], dataSize[i]);
-    }
-    ++currentSend;
-    if(currentSend == clientNum) {
-        lastFinish = false;
-        currentSend = 0;
+        //printf("send learnable layer id %d size %d\n", i, learnable_params[i]->count() * sizeof(Dtype));
+        sendAll(sock, learnable_params[i]->cpu_data(), dataSize[i]);
     }
     //printf("send model to client done\n");
 }
 
 template<typename Dtype>
 void SyncManager<Dtype>::waitDiff() {
-    std::unique_lock<std::mutex> lck(countLock);
-    finishCond.wait(lck, [this]{return currentRecv == clientNum;});
+    std::unique_lock<std::mutex> lck(lastUpdateFinishLock);
+    diffRecvFinishCond.wait(lck, [this]{ return diffRecv == clientNum;});
     mergeDiff();
 }
 
 template<typename Dtype>
 void SyncManager<Dtype>::finishUpdate() {
-    currentRecv = 0;
-    //for(size_t i = 0; i < learnable_params.size(); ++i) {
-    //    auto blob = learnable_params[i];
-    //    caffe::caffe_set(blob->count(), static_cast<Dtype>(0), diffPtrs[i]);
-    //}
-    lastFinish = true;
-    finishCond.notify_all();
+    diffRecv = 0;
+    lastUpdateFinish = true;
+    lastUpdateFinishCond.notify_all();
 }
 
 template<typename Dtype>
 void SyncManager<Dtype>::mergeDiff() {
-    // set diff to zero.
-    //for(size_t i = 0; i < learnable_params.size(); ++i) {
-    //    auto blob = learnable_params[i];
-    //    caffe::caffe_set(blob->count(), static_cast<Dtype>(0), blob->mutable_cpu_diff());
-    //}
+    //printf("%d client num\n", clientNum);
     for(auto it = sock2recvCache.begin(); it !=  sock2recvCache.end(); ++it) {
         for(size_t i = 0; i < learnable_params.size(); ++i) {
-            Dtype* mdata = diffPtrs[i];
+            Dtype* mdata = learnable_params[i]->mutable_cpu_diff();
             for(int j = 0; j < learnable_params[i]->count(); ++j) {
                 mdata[j] += (*it->second)[i][j] / clientNum;
+                //mdata[j] += (*it->second)[i][j] / clientNum;
             }
         }
         free(it->second);

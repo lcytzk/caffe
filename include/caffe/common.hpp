@@ -109,6 +109,7 @@ class Caffe {
   static Caffe& Get();
 
   enum Brew { CPU, GPU };
+  enum PSBrew { SERVER, CLIENT };
 
   // This random number generator facade hides boost and CUDA rng
   // implementation from one another (for cross-platform compatibility).
@@ -140,12 +141,14 @@ class Caffe {
 
   // Returns the mode: running on CPU or GPU.
   inline static Brew mode() { return Get().mode_; }
+  inline static PSBrew ps_mode() { return Get().ps_mode_; }
   // The setters for the variables
   // Sets the mode. It is recommended that you don't change the mode halfway
   // into the program since that may cause allocation of pinned memory being
   // freed in a non-pinned way, which may cause problems - I haven't verified
   // it personally but better to note it here in the header file.
   inline static void set_mode(Brew mode) { Get().mode_ = mode; }
+  inline static void set_ps_mode(PSBrew mode) { Get().ps_mode_ = mode; }
   // Sets the random seed of both boost and curand
   static void set_random_seed(const unsigned int seed);
   // Sets the device. Since we have cublas and curand stuff, set device also
@@ -175,6 +178,7 @@ class Caffe {
   shared_ptr<RNG> random_generator_;
 
   Brew mode_;
+  PSBrew ps_mode_;
 
   // Parallel training
   int solver_count_;

@@ -98,6 +98,8 @@ void SGDSolver<Dtype>::ClipGradients() {
   }
 }
 
+// TODO @liangchenye do lr, norm, reg here, then net update to add them.
+// lr, norm, reg, update should done in server.
 template <typename Dtype>
 void SGDSolver<Dtype>::ApplyUpdate() {
   Dtype rate = GetLearningRate();

@@ -8,6 +8,9 @@
 #include "caffe/solver_factory.hpp"
 #include "caffe/util/benchmark.hpp"
 
+// @liangchenye
+#include "caffe/milk/sync_manager.hpp"
+
 namespace caffe {
 
 /**
@@ -66,7 +69,7 @@ class Solver {
   // function that produces a SolverState protocol buffer that needs to be
   // written to disk together with the learned net.
   void Snapshot();
-  virtual ~Solver() {}
+  virtual ~Solver() { if(syncManager) delete syncManager; }
   inline const SolverParameter& param() const { return param_; }
   inline shared_ptr<Net<Dtype> > net() { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
@@ -93,6 +96,9 @@ class Solver {
    * @brief Returns the solver type.
    */
   virtual inline const char* type() const { return ""; }
+
+  void SetPSMode(int mode);
+  inline void SetClientNum(int num) { clientNum = num; }
 
  protected:
   // Make and apply the update value for the current iteration.
@@ -130,6 +136,10 @@ class Solver {
   float iterations_last_;
 
   DISABLE_COPY_AND_ASSIGN(Solver);
+  // @liangchenye PS mode -1 for no role, 0 for server and 1 for client
+  int ps_mode_;
+  int clientNum;
+  SyncManager<Dtype> *syncManager;
 };
 
 }  // namespace caffe

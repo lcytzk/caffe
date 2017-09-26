@@ -64,6 +64,12 @@ class Net {
    */
   void ClearParamDiffs();
 
+  ///**
+  // * @brief Sync model with parameter server.
+  // * TODO @liangchenye
+  // */
+  //void SyncModel();
+
   /**
    * The network backward should take no input and output, since it solely
    * computes the gradient w.r.t the parameters, and the data has already been
@@ -84,8 +90,11 @@ class Net {
 
   Dtype ForwardBackward() {
     Dtype loss;
+    // server has no forward and backward, only update.
+    //if(GConfig.runMode != "server") {
     Forward(&loss);
     Backward();
+    //}
     return loss;
   }
 

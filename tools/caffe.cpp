@@ -54,6 +54,10 @@ DEFINE_string(sigint_effect, "stop",
 DEFINE_string(sighup_effect, "snapshot",
              "Optional; action to take when a SIGHUP signal is received: "
              "snapshot, stop or none.");
+DEFINE_int32(ps_mode, -1,
+             "ps param. run in server mode or client mode.");
+DEFINE_int32(client_num, 1,
+             "The num of client when use ps mode.");
 
 // A simple registry for caffe commands.
 typedef int (*BrewFunction)();
@@ -237,6 +241,9 @@ int train() {
       solver(caffe::SolverRegistry<float>::CreateSolver(solver_param));
 
   solver->SetActionFunction(signal_handler.GetActionFunction());
+  LOG(INFO) << "ps mode is " << FLAGS_ps_mode;
+  solver->SetClientNum(FLAGS_client_num);
+  solver->SetPSMode(FLAGS_ps_mode);
 
   if (FLAGS_snapshot.size()) {
     LOG(INFO) << "Resuming from " << FLAGS_snapshot;
